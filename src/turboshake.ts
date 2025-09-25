@@ -118,6 +118,10 @@ function ensureUint8Array(message: Uint8Array | ArrayBufferView | ArrayLike<numb
   return array;
 }
 
+/**
+ * TurboShake class implementing the TurboSHAKE XOF (Extendable Output Function).
+ * Provides streaming interface for absorbing input data and squeezing arbitrary-length output.
+ */
 export class TurboShake {
   private readonly rate: number;
   private readonly separationByte: number;
@@ -127,6 +131,11 @@ export class TurboShake {
   private finalized: boolean;
   private squeezeOffset: number;
 
+  /**
+   * Creates a new TurboShake instance.
+   * @param rate - The rate parameter in bytes (168 for TurboSHAKE128, 136 for TurboSHAKE256)
+   * @param separationByte - Domain separation byte value (0x01-0xFF)
+   */
   constructor(rate: number, separationByte: number) {
     if (!Number.isInteger(rate) || rate <= 0) {
       throw new RangeError("rate must be a positive integer");
@@ -143,6 +152,12 @@ export class TurboShake {
     this.squeezeOffset = rate; // force refill on first use after finalize
   }
 
+  /**
+   * Absorbs input data into the sponge state.
+   * @param message - Input data to absorb
+   * @returns This instance for method chaining
+   * @throws Error if called after squeezing has begun
+   */
   update(message: Uint8Array | ArrayBufferView | ArrayLike<number>): this {
     if (this.finalized) {
       throw new Error("Cannot update after squeezing has begun");
@@ -183,6 +198,12 @@ export class TurboShake {
     return this;
   }
 
+  /**
+   * Squeezes output data from the sponge.
+   * @param outputLength - Number of bytes to output
+   * @returns Output bytes as Uint8Array
+   * @throws RangeError if outputLength is negative or not an integer
+   */
   squeeze(outputLength: number): Uint8Array {
     if (outputLength < 0 || !Number.isInteger(outputLength)) {
       throw new RangeError("outputLength must be a non-negative integer");
@@ -192,6 +213,10 @@ export class TurboShake {
     return out;
   }
 
+  /**
+   * Creates a deep copy of this TurboShake instance.
+   * @returns New TurboShake instance with identical state
+   */
   clone(): TurboShake {
     const clone = new TurboShake(this.rate, this.separationByte);
     for (let i = 0; i < STATE_SIZE; i++) {
@@ -204,6 +229,15 @@ export class TurboShake {
     return clone;
   }
 
+  /**
+   * Squeezes output data directly into a provided array.
+   * @param target - Target array to write output into
+   * @param offset - Starting offset in target array (default: 0)
+   * @param length - Number of bytes to write (default: target.length - offset)
+   * @returns The target array for convenience
+   * @throws TypeError if target is not Uint8Array
+   * @throws RangeError for invalid offset or length parameters
+   */
   squeezeInto(target: Uint8Array, offset = 0, length?: number): Uint8Array {
     if (!(target instanceof Uint8Array)) {
       throw new TypeError("target must be a Uint8Array");
@@ -240,6 +274,11 @@ export class TurboShake {
     return target;
   }
 
+  /**
+   * Squeezes output data and returns it as a hexadecimal string.
+   * @param outputLength - Number of bytes to output
+   * @returns Uppercase hexadecimal string representation
+   */
   squeezeHex(outputLength: number): string {
     return bytesToHex(this.squeeze(outputLength));
   }
@@ -278,30 +317,73 @@ function turboshake(rate: number, message: Uint8Array | ArrayBufferView | ArrayL
   return ctx.squeeze(outputLength);
 }
 
+/**
+ * Computes TurboSHAKE128 hash with 128-bit security level.
+ * @param message - Input message to hash
+ * @param separationByte - Domain separation byte (0x01-0xFF)
+ * @param outputLength - Desired output length in bytes
+ * @returns Hash output as Uint8Array
+ */
 export function turboshake128(message: Uint8Array | ArrayBufferView | ArrayLike<number>, separationByte: number, outputLength: number): Uint8Array {
   return turboshake(168, message, separationByte, outputLength);
 }
 
+/**
+ * Computes TurboSHAKE256 hash with 256-bit security level.
+ * @param message - Input message to hash
+ * @param separationByte - Domain separation byte (0x01-0xFF)
+ * @param outputLength - Desired output length in bytes
+ * @returns Hash output as Uint8Array
+ */
 export function turboshake256(message: Uint8Array | ArrayBufferView | ArrayLike<number>, separationByte: number, outputLength: number): Uint8Array {
   return turboshake(136, message, separationByte, outputLength);
 }
 
+/**
+ * Computes TurboSHAKE128 hash and returns it as a hexadecimal string.
+ * @param message - Input message to hash
+ * @param separationByte - Domain separation byte (0x01-0xFF)
+ * @param outputLength - Desired output length in bytes
+ * @returns Uppercase hexadecimal string representation
+ */
 export function turboshake128Hex(message: Uint8Array | ArrayBufferView | ArrayLike<number>, separationByte: number, outputLength: number): string {
   return bytesToHex(turboshake128(message, separationByte, outputLength));
 }
 
+/**
+ * Computes TurboSHAKE256 hash and returns it as a hexadecimal string.
+ * @param message - Input message to hash
+ * @param separationByte - Domain separation byte (0x01-0xFF)
+ * @param outputLength - Desired output length in bytes
+ * @returns Uppercase hexadecimal string representation
+ */
 export function turboshake256Hex(message: Uint8Array | ArrayBufferView | ArrayLike<number>, separationByte: number, outputLength: number): string {
   return bytesToHex(turboshake256(message, separationByte, outputLength));
 }
 
+/**
+ * Creates a new TurboShake instance configured for TurboSHAKE128.
+ * @param separationByte - Domain separation byte (0x01-0xFF)
+ * @returns New TurboShake instance with 128-bit security level
+ */
 export function createTurboShake128(separationByte: number): TurboShake {
   return new TurboShake(168, separationByte);
 }
 
+/**
+ * Creates a new TurboShake instance configured for TurboSHAKE256.
+ * @param separationByte - Domain separation byte (0x01-0xFF)
+ * @returns New TurboShake instance with 256-bit security level
+ */
 export function createTurboShake256(separationByte: number): TurboShake {
   return new TurboShake(136, separationByte);
 }
 
+/**
+ * Converts a byte array to an uppercase hexadecimal string.
+ * @param bytes - Input byte array
+ * @returns Uppercase hexadecimal string representation
+ */
 export function bytesToHex(bytes: Uint8Array): string {
   const hex: string[] = new Array(bytes.length);
   for (let i = 0; i < bytes.length; i++) {
@@ -311,6 +393,12 @@ export function bytesToHex(bytes: Uint8Array): string {
   return hex.join("");
 }
 
+/**
+ * Converts a hexadecimal string to a byte array.
+ * @param hex - Hexadecimal string (case-insensitive, non-hex characters ignored)
+ * @returns Byte array representation
+ * @throws Error if hex string has odd length after cleaning
+ */
 export function hexToBytes(hex: string): Uint8Array {
   const clean = hex.replace(/[^0-9a-fA-F]/g, "");
   if (clean.length % 2 !== 0) {
