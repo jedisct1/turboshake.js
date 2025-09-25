@@ -4,6 +4,9 @@ import {
   hexToBytes,
   turboshake128,
   turboshake256,
+  turboshake128Hex,
+  createTurboShake128,
+  createTurboShake256,
 } from "../src/turboshake";
 
 function pattern(length: number): Uint8Array {
@@ -146,4 +149,84 @@ describe("TurboSHAKE256", () => {
       expect(bytesToHex(out)).toBe(expected);
     });
   }
+});
+
+describe("Incremental TurboSHAKE", () => {
+  test("chunked update matches one-shot TurboSHAKE128", () => {
+    const message = getPattern(1024);
+    const ctx = createTurboShake128(0x1f);
+    let start = 0;
+    for (const chunkSize of [0, 1, 7, 128, 169, 255, 464]) {
+      const end = Math.min(message.length, start + chunkSize);
+      if (end > start) {
+        ctx.update(message.subarray(start, end));
+      }
+      start = end;
+    }
+    if (start < message.length) {
+      ctx.update(message.subarray(start));
+    }
+
+    const out = ctx.squeeze(96);
+    const expected = turboshake128(message, 0x1f, 96);
+    expect(bytesToHex(out)).toBe(bytesToHex(expected));
+  });
+
+  test("byte-wise update matches one-shot TurboSHAKE256", () => {
+    const message = getPattern(313);
+    const ctx = createTurboShake256(0x1f);
+    for (let i = 0; i < message.length; i++) {
+      ctx.update(message.subarray(i, i + 1));
+    }
+    const out = ctx.squeeze(128);
+    const expected = turboshake256(message, 0x1f, 128);
+    expect(bytesToHex(out)).toBe(bytesToHex(expected));
+  });
+
+  test("multiple squeeze calls continue output stream", () => {
+    const message = getPattern(200);
+    const ctx = createTurboShake128(0x1f);
+    ctx.update(message.subarray(0, 50));
+    ctx.update(message.subarray(50));
+
+    const first = ctx.squeeze(40);
+    const second = ctx.squeeze(60);
+    const combined = new Uint8Array(100);
+    combined.set(first, 0);
+    combined.set(second, 40);
+
+    const expected = turboshake128(message, 0x1f, 100);
+    expect(bytesToHex(combined)).toBe(bytesToHex(expected));
+  });
+
+  test("squeezeHex matches helper", () => {
+    const ctx = createTurboShake128(0x1f);
+    ctx.update(new Uint8Array([0x01, 0x02, 0x03]));
+    const hex = ctx.squeezeHex(64);
+    const expected = turboshake128Hex(new Uint8Array([0x01, 0x02, 0x03]), 0x1f, 64);
+    expect(hex).toBe(expected);
+  });
+
+  test("update after squeeze throws", () => {
+    const ctx = createTurboShake256(0x06);
+    ctx.update(getPattern(10));
+    ctx.squeeze(32);
+    expect(() => ctx.update(getPattern(1))).toThrow("Cannot update after squeezing has begun");
+  });
+
+  test("squeezeInto writes into provided buffer", () => {
+    const ctx = createTurboShake128(0x1f);
+    ctx.update(getPattern(32));
+    const target = new Uint8Array(64);
+    ctx.squeezeInto(target, 16, 32);
+    const expected = turboshake128(getPattern(32), 0x1f, 32);
+    expect(bytesToHex(target.subarray(16, 48))).toBe(bytesToHex(expected));
+  });
+
+  test("empty message works without explicit update", () => {
+    const ctx = createTurboShake256(0x1f);
+    const out = ctx.squeeze(64);
+    const expected = turboshake256(new Uint8Array(0), 0x1f, 64);
+    expect(bytesToHex(out)).toBe(bytesToHex(expected));
+  });
 });

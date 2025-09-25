@@ -103,6 +103,15 @@ function writeStateBytes(state: bigint[], target: Uint8Array, targetOffset: numb
   }
 }
 
+function readStateBytes(state: bigint[], sourceOffset: number, target: Uint8Array, targetOffset: number, length: number): void {
+  for (let i = 0; i < length; i++) {
+    const index = sourceOffset + i;
+    const laneIndex = index >> 3;
+    const shift = BigInt((index & 7) * 8);
+    target[targetOffset + i] = Number((state[laneIndex] >> shift) & 0xFFn);
+  }
+}
+
 function ensureUint8Array(message: Uint8Array | ArrayBufferView | ArrayLike<number>): Uint8Array {
   if (message instanceof Uint8Array) {
     return message;
@@ -117,53 +126,152 @@ function ensureUint8Array(message: Uint8Array | ArrayBufferView | ArrayLike<numb
   return array;
 }
 
-function turboshake(rate: number, message: Uint8Array | ArrayBufferView | ArrayLike<number>, separationByte: number, outputLength: number): Uint8Array {
-  if (separationByte < 0 || separationByte > 0xff || !Number.isInteger(separationByte)) {
-    throw new RangeError("separationByte must be an integer in [0, 255]");
-  }
-  if (outputLength < 0 || !Number.isInteger(outputLength)) {
-    throw new RangeError("outputLength must be a non-negative integer");
-  }
+export class TurboShake {
+  private readonly rate: number;
+  private readonly separationByte: number;
+  private readonly state: bigint[];
+  private readonly buffer: Uint8Array;
+  private bufferLength: number;
+  private finalized: boolean;
+  private squeezeOffset: number;
 
-  const msgBytes = ensureUint8Array(message);
-  const inputLength = msgBytes.length + 1;
-  const input = new Uint8Array(inputLength);
-  input.set(msgBytes, 0);
-  input[msgBytes.length] = separationByte;
-
-  const state: bigint[] = new Array(STATE_SIZE).fill(0n);
-
-  const blockSize = rate;
-  let offset = 0;
-
-  while (offset < inputLength - blockSize) {
-    xorBlock(state, input.subarray(offset, offset + blockSize));
-    keccakP1600_12rounds(state);
-    offset += blockSize;
-  }
-
-  const lastBlock = input.subarray(offset);
-  xorBlock(state, lastBlock);
-
-  const padIndex = blockSize - 1;
-  const padLane = padIndex >> 3;
-  const padShift = BigInt((padIndex & 7) * 8);
-  state[padLane] = (state[padLane] ^ (0x80n << padShift)) & MASK_64;
-  keccakP1600_12rounds(state);
-
-  const output = new Uint8Array(outputLength);
-  let produced = 0;
-
-  while (produced < outputLength) {
-    const chunk = Math.min(blockSize, outputLength - produced);
-    writeStateBytes(state, output, produced, chunk);
-    produced += chunk;
-    if (produced < outputLength) {
-      keccakP1600_12rounds(state);
+  constructor(rate: number, separationByte: number) {
+    if (!Number.isInteger(rate) || rate <= 0) {
+      throw new RangeError("rate must be a positive integer");
     }
+    if (separationByte < 0 || separationByte > 0xff || !Number.isInteger(separationByte)) {
+      throw new RangeError("separationByte must be an integer in [0, 255]");
+    }
+    this.rate = rate;
+    this.separationByte = separationByte;
+    this.state = new Array(STATE_SIZE).fill(0n);
+    this.buffer = new Uint8Array(rate);
+    this.bufferLength = 0;
+    this.finalized = false;
+    this.squeezeOffset = rate; // force refill on first use after finalize
   }
 
-  return output;
+  update(message: Uint8Array | ArrayBufferView | ArrayLike<number>): this {
+    if (this.finalized) {
+      throw new Error("Cannot update after squeezing has begun");
+    }
+
+    const chunk = ensureUint8Array(message);
+    const { rate, buffer, state } = this;
+    let bufferLength = this.bufferLength;
+    let offset = 0;
+
+    if (bufferLength > 0) {
+      const toFill = Math.min(rate - bufferLength, chunk.length);
+      buffer.set(chunk.subarray(0, toFill), bufferLength);
+      bufferLength += toFill;
+      offset += toFill;
+      if (bufferLength === rate) {
+        xorBlock(state, buffer);
+        keccakP1600_12rounds(state);
+        bufferLength = 0;
+      }
+    }
+
+    const chunkLength = chunk.length;
+    while (offset + rate <= chunkLength) {
+      const block = chunk.subarray(offset, offset + rate);
+      xorBlock(state, block);
+      keccakP1600_12rounds(state);
+      offset += rate;
+    }
+
+    if (offset < chunkLength) {
+      const remaining = chunk.subarray(offset);
+      buffer.set(remaining, bufferLength);
+      bufferLength += remaining.length;
+    }
+
+    this.bufferLength = bufferLength;
+    return this;
+  }
+
+  squeeze(outputLength: number): Uint8Array {
+    if (outputLength < 0 || !Number.isInteger(outputLength)) {
+      throw new RangeError("outputLength must be a non-negative integer");
+    }
+    const out = new Uint8Array(outputLength);
+    this.squeezeInto(out);
+    return out;
+  }
+
+  squeezeInto(target: Uint8Array, offset = 0, length?: number): Uint8Array {
+    if (!(target instanceof Uint8Array)) {
+      throw new TypeError("target must be a Uint8Array");
+    }
+    if (!Number.isInteger(offset) || offset < 0 || offset > target.length) {
+      throw new RangeError("offset must be an integer within [0, target.length]");
+    }
+    const actualLength = length === undefined ? target.length - offset : length;
+    if (!Number.isInteger(actualLength) || actualLength < 0 || offset + actualLength > target.length) {
+      throw new RangeError("length must be a non-negative integer and offset + length must be <= target.length");
+    }
+    if (actualLength === 0) {
+      return target;
+    }
+
+    this.ensureFinalized();
+
+    let produced = 0;
+    const { rate, state } = this;
+
+    while (produced < actualLength) {
+      if (this.squeezeOffset === rate) {
+        keccakP1600_12rounds(state);
+        this.squeezeOffset = 0;
+      }
+
+      const available = rate - this.squeezeOffset;
+      const chunk = Math.min(available, actualLength - produced);
+      readStateBytes(state, this.squeezeOffset, target, offset + produced, chunk);
+      this.squeezeOffset += chunk;
+      produced += chunk;
+    }
+
+    return target;
+  }
+
+  squeezeHex(outputLength: number): string {
+    return bytesToHex(this.squeeze(outputLength));
+  }
+
+  private ensureFinalized(): void {
+    if (this.finalized) {
+      return;
+    }
+    const { rate, state, buffer } = this;
+
+    if (this.bufferLength >= rate) {
+      throw new Error("Internal buffer is full before finalization");
+    }
+
+    buffer[this.bufferLength++] = this.separationByte;
+
+    xorBlock(state, buffer.subarray(0, this.bufferLength));
+
+    const padIndex = rate - 1;
+    const padLane = padIndex >> 3;
+    const padShift = BigInt((padIndex & 7) * 8);
+    state[padLane] = (state[padLane] ^ (0x80n << padShift)) & MASK_64;
+
+    keccakP1600_12rounds(state);
+
+    this.buffer.fill(0);
+    this.bufferLength = 0;
+    this.finalized = true;
+    this.squeezeOffset = 0;
+  }
+}
+
+function turboshake(rate: number, message: Uint8Array | ArrayBufferView | ArrayLike<number>, separationByte: number, outputLength: number): Uint8Array {
+  const ctx = new TurboShake(rate, separationByte);
+  ctx.update(message);
+  return ctx.squeeze(outputLength);
 }
 
 export function turboshake128(message: Uint8Array | ArrayBufferView | ArrayLike<number>, separationByte: number, outputLength: number): Uint8Array {
@@ -180,6 +288,14 @@ export function turboshake128Hex(message: Uint8Array | ArrayBufferView | ArrayLi
 
 export function turboshake256Hex(message: Uint8Array | ArrayBufferView | ArrayLike<number>, separationByte: number, outputLength: number): string {
   return bytesToHex(turboshake256(message, separationByte, outputLength));
+}
+
+export function createTurboShake128(separationByte: number): TurboShake {
+  return new TurboShake(168, separationByte);
+}
+
+export function createTurboShake256(separationByte: number): TurboShake {
+  return new TurboShake(136, separationByte);
 }
 
 export function bytesToHex(bytes: Uint8Array): string {
@@ -202,4 +318,3 @@ export function hexToBytes(hex: string): Uint8Array {
   }
   return out;
 }
-

@@ -48,6 +48,26 @@ const hash64 = turboshake128(message, 0x1F, 64);
 const hash100 = turboshake128(message, 0x1F, 100);
 ```
 
+### Incremental Usage
+
+```typescript
+import { createTurboShake128 } from 'turboshake';
+
+const ctx = createTurboShake128(0x1F);
+
+// Absorb data in chunks
+ctx.update(chunk1);
+ctx.update(chunk2);
+
+// Squeeze output incrementally
+const first32 = ctx.squeeze(32);
+const next32 = ctx.squeeze(32);
+
+// You can also write into an existing buffer
+const target = new Uint8Array(64);
+ctx.squeezeInto(target, 0, 64);
+```
+
 ### Domain Separation
 
 The separation byte allows domain separation for different use cases:
@@ -101,6 +121,20 @@ const parsedBytes = hexToBytes("1E415F");
 
 - Same parameters as `turboshake256`
 - Returns: `string` - Hexadecimal string representation
+
+#### `createTurboShake128(separationByte)` / `createTurboShake256(separationByte)`
+
+- `separationByte`: `number` - Domain separation byte (0-255)
+- Returns: `TurboShake` instance configured for TurboSHAKE128 or TurboSHAKE256
+
+### `TurboShake` Class
+
+The `TurboShake` class powers the incremental API and exposes the following methods:
+
+- `update(input)` – Absorb additional data (`Uint8Array | ArrayBufferView | ArrayLike<number>`). Throws if called after squeezing.
+- `squeeze(length)` – Return the next `length` bytes as a new `Uint8Array`.
+- `squeezeInto(target, offset = 0, length = target.length - offset)` – Write the next `length` bytes into `target`.
+- `squeezeHex(length)` – Return the next `length` bytes as an uppercase hex string.
 
 #### `bytesToHex(bytes)`
 
