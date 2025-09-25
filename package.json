@@ -39,12 +39,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/your-username/turboshake.git"
+    "url": "git+https://github.com/jedisct1/turboshake.js.git"
   },
   "bugs": {
-    "url": "https://github.com/your-username/turboshake/issues"
+    "url": "https://github.com/jedisct1/turboshake.js/issues"
   },
-  "homepage": "https://github.com/your-username/turboshake#readme",
+  "homepage": "https://github.com/jedisct1/turboshake.js#readme",
   "engines": {
     "node": ">=18.0.0"
   },
