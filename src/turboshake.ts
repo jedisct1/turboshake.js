@@ -192,6 +192,18 @@ export class TurboShake {
     return out;
   }
 
+  clone(): TurboShake {
+    const clone = new TurboShake(this.rate, this.separationByte);
+    for (let i = 0; i < STATE_SIZE; i++) {
+      clone.state[i] = this.state[i];
+    }
+    clone.buffer.set(this.buffer);
+    clone.bufferLength = this.bufferLength;
+    clone.finalized = this.finalized;
+    clone.squeezeOffset = this.squeezeOffset;
+    return clone;
+  }
+
   squeezeInto(target: Uint8Array, offset = 0, length?: number): Uint8Array {
     if (!(target instanceof Uint8Array)) {
       throw new TypeError("target must be a Uint8Array");

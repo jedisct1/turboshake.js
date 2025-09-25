@@ -214,6 +214,39 @@ describe("Incremental TurboSHAKE", () => {
     expect(() => ctx.update(getPattern(1))).toThrow("Cannot update after squeezing has begun");
   });
 
+  test("clone before finalization preserves pending state", () => {
+    const message = getPattern(256);
+    const ctx = createTurboShake128(0x1f);
+    ctx.update(message.subarray(0, 120));
+    const cloned = ctx.clone();
+    const tail = message.subarray(120);
+    ctx.update(tail);
+    cloned.update(tail);
+
+    const originalOut = ctx.squeeze(64);
+    const cloneOut = cloned.squeeze(96);
+    const expected = turboshake128(message, 0x1f, 96);
+
+    expect(bytesToHex(originalOut)).toBe(bytesToHex(expected.subarray(0, 64)));
+    expect(bytesToHex(cloneOut)).toBe(bytesToHex(expected));
+  });
+
+  test("clone after squeezing continues output stream independently", () => {
+    const message = getPattern(384);
+    const ctx = createTurboShake256(0x06);
+    ctx.update(message);
+
+    const firstChunk = ctx.squeeze(48);
+    const cloned = ctx.clone();
+    const originalNext = ctx.squeeze(48);
+    const cloneNext = cloned.squeeze(48);
+    const expected = turboshake256(message, 0x06, 96);
+
+    expect(bytesToHex(firstChunk)).toBe(bytesToHex(expected.subarray(0, 48)));
+    expect(bytesToHex(originalNext)).toBe(bytesToHex(expected.subarray(48, 96)));
+    expect(bytesToHex(cloneNext)).toBe(bytesToHex(expected.subarray(48, 96)));
+  });
+
   test("squeezeInto writes into provided buffer", () => {
     const ctx = createTurboShake128(0x1f);
     ctx.update(getPattern(32));
