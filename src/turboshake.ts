@@ -95,14 +95,6 @@ function xorBlock(state: bigint[], block: Uint8Array): void {
   }
 }
 
-function writeStateBytes(state: bigint[], target: Uint8Array, targetOffset: number, length: number): void {
-  for (let i = 0; i < length; i++) {
-    const laneIndex = i >> 3;
-    const shift = BigInt((i & 7) * 8);
-    target[targetOffset + i] = Number((state[laneIndex] >> shift) & 0xFFn);
-  }
-}
-
 function readStateBytes(state: bigint[], sourceOffset: number, target: Uint8Array, targetOffset: number, length: number): void {
   for (let i = 0; i < length; i++) {
     const index = sourceOffset + i;
