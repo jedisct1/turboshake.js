@@ -1,6 +1,6 @@
 {
   "name": "turboshake",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Pure TypeScript implementation of TurboSHAKE128 and TurboSHAKE256 cryptographic hash functions",
   "type": "module",
   "main": "dist/index.js",
