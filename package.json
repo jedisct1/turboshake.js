@@ -1,0 +1,55 @@
+{
+  "name": "turboshake",
+  "version": "1.0.0",
+  "description": "Pure TypeScript implementation of TurboSHAKE128 and TurboSHAKE256 cryptographic hash functions",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "bun build src/index.ts --outdir=dist --target=node --format=esm --splitting",
+    "test": "bun test",
+    "prepublishOnly": "bun run build",
+    "lint": "bunx biome check src/ tests/",
+    "format": "bunx biome check --apply src/ tests/",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "cryptography",
+    "hash",
+    "xof",
+    "turboshake",
+    "keccak",
+    "sha3",
+    "typescript",
+    "pure-js"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-username/turboshake.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/turboshake/issues"
+  },
+  "homepage": "https://github.com/your-username/turboshake#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.8.0",
+    "bun-types": "^1.2.18"
+  }
+}
