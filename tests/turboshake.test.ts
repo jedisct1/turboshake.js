@@ -7,7 +7,14 @@ import {
   turboshake128Hex,
   createTurboShake128,
   createTurboShake256,
-} from "../src/turboshake";
+  MiniShake,
+  TurboShake,
+  minishake128,
+  minishake256,
+  minishake128Hex,
+  minishake256Hex,
+  createMiniShake256,
+} from "../src/index";
 
 function pattern(length: number): Uint8Array {
   if (!Number.isInteger(length) || length < 0) {
@@ -147,6 +154,60 @@ describe("TurboSHAKE256", () => {
   }
 });
 
+// The MiniSHAKE paper has no test vectors, so these come from Zig's implementation.
+describe("MiniSHAKE128", () => {
+  // The outputs are one full 68-byte block.
+  // A 67-byte message leaves room for a single padding byte, and a 68-byte one fills the block.
+  const vectors: Array<[number, number, string]> = [
+    [0, 0x01, "4E21F95D5DAE60DDCA7BC29B5A0DA731D710B91F7E1EFFDB7BBD1055FD74618C7C4C9D983854D8112BE463C72C8F9EB331282C57CB85021A0BEB7DA45F4F71E5E83FB5E2"],
+    [67, 0x7f, "212781D32BFC5B723C46F99553B6F9AF289CCDADAD95349495E4BFD94465B32DB1462371CA63B717F1067AF554169F587606611DF3AAFD94C898D2E214C70BADAC62E315"],
+    [68, 0x7f, "465B49D27369F4BAC7D9CDEC77822C4D85E850645C07E81911AFBA7386493564BB2D5F6F3934515AC67DC962732F74E54EE812095729982293623038D0580D72D58E1399"],
+    [289, 0x01, "3A9FEE3C2109265B448F9F426064F30757707FBD0C7B89BEFED8C0418C744DEAA196BD358E6ED8FFD351E479DD8DB005FBE7890DBCA85756B3E04DAF723B64B99D62C63E"],
+  ];
+
+  for (const [length, domain, expected] of vectors) {
+    test(`ptn(${length} bytes), D=0x${domain.toString(16).toUpperCase()}, 68 bytes`, () => {
+      expect(minishake128Hex(getPattern(length), domain, 68)).toBe(expected);
+    });
+  }
+
+  test("empty message, D=0x01, 10032 bytes (last 32)", () => {
+    const out = minishake128(new Uint8Array(0), 0x01, 10032);
+    expect(bytesToHex(out.slice(-32))).toBe("F8DE1C5C14A1CDC8A975C7205F6C1EFF93F01E87D5D3F6F8F5A296CE9BCEB6AB");
+  });
+});
+
+describe("MiniSHAKE256", () => {
+  // A 35-byte message leaves room for a single padding byte, and a 36-byte one fills the block.
+  const vectors: Array<[number, number, string]> = [
+    [0, 0x01, "1E56563204EEF4CEF068B1666EEC7EF033C43B70B8133D020773E6197DC7B61101E1B28360A9E589757371D7E3DB8E1DFACE3D5661D39AB1C969850E50F550CC"],
+    [35, 0x7f, "88FCEF8C9AEB5FC4C500DF239667B272178B88F468DB31CDF7AAA63800706996EFEE44043A6143434D49623A69D57E9AF8AE0584062C3517BFB42CA043DEB8F0"],
+    [36, 0x7f, "D693EA589B92856BE4007D2942B3F7E5B8EAE66EDA0C2F21E5DFE815DB753541AA6CDC51E20565FC6D2BF341B1769B83EBAEDD893EDE7C684993B0B7236DD5ED"],
+    [289, 0x01, "320DF1E430040E0D23A913FB61EC23D819E54FE3FC39656B6B2AD2615CFCE8D2E9C7BAF1D7C9F38E0E80C7D4E82E17455EC1A7DA17B9D878A2958C11463D0748"],
+  ];
+
+  for (const [length, domain, expected] of vectors) {
+    test(`ptn(${length} bytes), D=0x${domain.toString(16).toUpperCase()}, 64 bytes`, () => {
+      expect(minishake256Hex(getPattern(length), domain, 64)).toBe(expected);
+    });
+  }
+
+  test("empty message, D=0x01, 10032 bytes (last 32)", () => {
+    const out = minishake256(new Uint8Array(0), 0x01, 10032);
+    expect(bytesToHex(out.slice(-32))).toBe("9EA7D897C931269967B296460CC34CF3156883A302FA9271F8A8177F6ED5028E");
+  });
+
+  test("clone, then squeeze in uneven parts", () => {
+    const message = getPattern(100);
+    const ctx = createMiniShake256(0x01).update(message.subarray(0, 50));
+    const cloned = ctx.clone();
+    const expected = minishake256Hex(message, 0x01, 64);
+    expect(cloned.update(message.subarray(50)).squeezeHex(64)).toBe(expected);
+    ctx.update(message.subarray(50));
+    expect(ctx.squeezeHex(21) + ctx.squeezeHex(43)).toBe(expected);
+  });
+});
+
 describe("Incremental TurboSHAKE", () => {
   test("chunked update matches one-shot TurboSHAKE128", () => {
     const message = getPattern(1024);
@@ -163,9 +224,7 @@ describe("Incremental TurboSHAKE", () => {
       ctx.update(message.subarray(start));
     }
 
-    const out = ctx.squeeze(96);
-    const expected = turboshake128(message, 0x1f, 96);
-    expect(bytesToHex(out)).toBe(bytesToHex(expected));
+    expect(ctx.squeezeHex(96)).toBe(turboshake128Hex(message, 0x1f, 96));
   });
 
   test("byte-wise update matches one-shot TurboSHAKE256", () => {
@@ -179,14 +238,6 @@ describe("Incremental TurboSHAKE", () => {
     expect(bytesToHex(out)).toBe(bytesToHex(expected));
   });
 
-  test("squeezeHex matches helper", () => {
-    const ctx = createTurboShake128(0x1f);
-    ctx.update(new Uint8Array([0x01, 0x02, 0x03]));
-    const hex = ctx.squeezeHex(64);
-    const expected = turboshake128Hex(new Uint8Array([0x01, 0x02, 0x03]), 0x1f, 64);
-    expect(hex).toBe(expected);
-  });
-
   test("update after squeeze throws", () => {
     const ctx = createTurboShake256(0x06);
     ctx.update(getPattern(10));
@@ -194,9 +245,11 @@ describe("Incremental TurboSHAKE", () => {
     expect(() => ctx.update(getPattern(1))).toThrow("Cannot update after squeezing has begun");
   });
 
-  test("separation byte must be in [0x01, 0x7F]", () => {
+  test("out of range parameters are rejected", () => {
     expect(() => createTurboShake128(0x00)).toThrow(RangeError);
     expect(() => createTurboShake128(0x80)).toThrow(RangeError);
+    expect(() => new TurboShake(200, 0x1f)).toThrow(RangeError);
+    expect(() => new MiniShake(35, 0x01)).toThrow(RangeError);
   });
 
   test("clone before finalization preserves pending state", () => {
@@ -239,12 +292,5 @@ describe("Incremental TurboSHAKE", () => {
     ctx.squeezeInto(target, 16, 32);
     const expected = turboshake128(getPattern(32), 0x1f, 32);
     expect(bytesToHex(target.subarray(16, 48))).toBe(bytesToHex(expected));
-  });
-
-  test("empty message works without explicit update", () => {
-    const ctx = createTurboShake256(0x1f);
-    const out = ctx.squeeze(64);
-    const expected = turboshake256(new Uint8Array(0), 0x1f, 64);
-    expect(bytesToHex(out)).toBe(bytesToHex(expected));
   });
 });

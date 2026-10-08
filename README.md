@@ -1,6 +1,7 @@
 # TurboSHAKE
 
 Pure TypeScript implementation of TurboSHAKE128 and TurboSHAKE256 cryptographic hash functions (XOFs - Extendable Output Functions) based on the Keccak permutation.
+It also implements MiniSHAKE128 and MiniSHAKE256.
 
 ## Installation
 
@@ -83,6 +84,32 @@ const domain2 = turboshake128(message, 0x06, 32);
 const domain3 = turboshake128(message, 0x1F, 32);
 ```
 
+### MiniSHAKE
+
+MiniSHAKE comes from the Keccak team ([ePrint 2026/2363](https://eprint.iacr.org/2026/2363)).
+
+It works like TurboSHAKE, but with a permutation half the size.
+It's meant for hashing lots of very short messages, for example in zero-knowledge proofs.
+
+A message of up to 67 bytes for MiniSHAKE128, or 35 bytes for MiniSHAKE256, fits in a single block.
+
+```typescript
+import { minishake128, minishake256, createMiniShake128 } from 'turboshake';
+
+const message = new TextEncoder().encode('Hello, world!');
+const hash128 = minishake128(message, 0x01, 32);
+const hash256 = minishake256(message, 0x01, 64);
+
+const ctx = createMiniShake128(0x01);
+ctx.update(message);
+console.log(ctx.squeezeHex(32)); // "0F4C58EF533BD9068B7B5282A552AF3B66006916044F33A6BD35B314001CA285"
+```
+
+The separation byte works the same way as with TurboSHAKE.
+If you don't need domain separation, the paper suggests 0x01.
+
+In this library, MiniSHAKE is also much faster than TurboSHAKE, which has to use BigInt.
+
 ### Utility Functions
 
 ```typescript
@@ -127,14 +154,30 @@ const parsedBytes = hexToBytes("1E415F");
 - `separationByte`: `number` - Domain separation byte (0x01-0x7F)
 - Returns: `TurboShake` instance configured for TurboSHAKE128 or TurboSHAKE256
 
-### `TurboShake` Class
+#### `minishake128(message, separationByte, outputLength)` / `minishake256(message, separationByte, outputLength)`
 
-The `TurboShake` class powers the incremental API and exposes the following methods:
+- Same parameters as `turboshake128`
+- Returns: `Uint8Array` - Hash output
 
-- `update(input)` – Absorb additional data (`Uint8Array | ArrayBufferView | ArrayLike<number>`). Throws if called after squeezing.
-- `squeeze(length)` – Return the next `length` bytes as a new `Uint8Array`.
-- `squeezeInto(target, offset = 0, length = target.length - offset)` – Write the next `length` bytes into `target`.
-- `squeezeHex(length)` – Return the next `length` bytes as an uppercase hex string.
+#### `minishake128Hex(message, separationByte, outputLength)` / `minishake256Hex(message, separationByte, outputLength)`
+
+- Same parameters as `turboshake128`
+- Returns: `string` - Hexadecimal string representation
+
+#### `createMiniShake128(separationByte)` / `createMiniShake256(separationByte)`
+
+- `separationByte`: `number` - Domain separation byte (0x01-0x7F)
+- Returns: `MiniShake` instance configured for MiniSHAKE128 or MiniSHAKE256
+
+### `TurboShake` and `MiniShake` Classes
+
+Both classes are used for incremental hashing, and have the same methods:
+
+- `update(input)` - Absorb additional data (`Uint8Array | ArrayBufferView | ArrayLike<number>`). Throws if called after squeezing.
+- `squeeze(length)` - Return the next `length` bytes as a new `Uint8Array`.
+- `squeezeInto(target, offset = 0, length = target.length - offset)` - Write the next `length` bytes into `target`.
+- `squeezeHex(length)` - Return the next `length` bytes as an uppercase hex string.
+- `clone()` - Return an independent copy of the current state.
 
 #### `bytesToHex(bytes)`
 

@@ -1,7 +1,7 @@
 {
   "name": "turboshake",
   "version": "1.0.3",
-  "description": "Pure TypeScript implementation of TurboSHAKE128 and TurboSHAKE256 cryptographic hash functions",
+  "description": "Pure TypeScript implementation of the TurboSHAKE and MiniSHAKE cryptographic hash functions",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
@@ -30,6 +30,7 @@
     "hash",
     "xof",
     "turboshake",
+    "minishake",
     "keccak",
     "sha3",
     "typescript",

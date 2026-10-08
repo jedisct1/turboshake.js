@@ -1,3 +1,6 @@
+import { KeccakSponge, type KeccakState } from "./sponge.js";
+import { bytesToHex, type Input } from "./utils.js";
+
 const STATE_SIZE = 25;
 const MASK_64 = (1n << 64n) - 1n;
 
@@ -86,236 +89,53 @@ function keccakP1600_12rounds(state: bigint[]): void {
   }
 }
 
-function xorBlock(state: bigint[], block: Uint8Array): void {
-  const len = block.length;
-  for (let i = 0; i < len; i++) {
-    const laneIndex = i >> 3;
-    const shift = BigInt((i & 7) * 8);
-    state[laneIndex] = (state[laneIndex] ^ (BigInt(block[i]) << shift)) & MASK_64;
-  }
-}
+class KeccakP1600 implements KeccakState {
+  readonly byteLength = 200;
+  private readonly lanes: bigint[] = new Array<bigint>(STATE_SIZE).fill(0n);
 
-function readStateBytes(state: bigint[], sourceOffset: number, target: Uint8Array, targetOffset: number, length: number): void {
-  for (let i = 0; i < length; i++) {
-    const index = sourceOffset + i;
-    const laneIndex = index >> 3;
-    const shift = BigInt((index & 7) * 8);
-    target[targetOffset + i] = Number((state[laneIndex] >> shift) & 0xFFn);
+  xorBytes(offset: number, bytes: Uint8Array): void {
+    for (let i = 0; i < bytes.length; i++) {
+      this.xorByte(offset + i, bytes[i]);
+    }
   }
-}
 
-function ensureUint8Array(message: Uint8Array | ArrayBufferView | ArrayLike<number>): Uint8Array {
-  if (message instanceof Uint8Array) {
-    return message;
+  xorByte(offset: number, byte: number): void {
+    this.lanes[offset >> 3] ^= BigInt(byte) << BigInt((offset & 7) * 8);
   }
-  if (ArrayBuffer.isView(message)) {
-    return new Uint8Array(message.buffer, message.byteOffset, message.byteLength);
+
+  extractBytes(offset: number, target: Uint8Array, targetOffset: number, length: number): void {
+    for (let i = 0; i < length; i++) {
+      const index = offset + i;
+      const laneIndex = index >> 3;
+      const shift = BigInt((index & 7) * 8);
+      target[targetOffset + i] = Number((this.lanes[laneIndex] >> shift) & 0xFFn);
+    }
   }
-  const array = new Uint8Array(message.length);
-  for (let i = 0; i < message.length; i++) {
-    array[i] = message[i] & 0xff;
+
+  permute(): void {
+    keccakP1600_12rounds(this.lanes);
   }
-  return array;
+
+  copyFrom(other: this): void {
+    for (let i = 0; i < STATE_SIZE; i++) {
+      this.lanes[i] = other.lanes[i];
+    }
+  }
 }
 
 /**
  * TurboShake class implementing the TurboSHAKE XOF (Extendable Output Function).
  * Provides streaming interface for absorbing input data and squeezing arbitrary-length output.
  */
-export class TurboShake {
-  private readonly rate: number;
-  private readonly separationByte: number;
-  private readonly state: bigint[];
-  private readonly buffer: Uint8Array;
-  private bufferLength: number;
-  private finalized: boolean;
-  private squeezeOffset: number;
-
+export class TurboShake extends KeccakSponge {
   /**
    * Creates a new TurboShake instance.
    * @param rate - The rate parameter in bytes (168 for TurboSHAKE128, 136 for TurboSHAKE256)
    * @param separationByte - Domain separation byte value (0x01-0x7F)
    */
   constructor(rate: number, separationByte: number) {
-    if (!Number.isInteger(rate) || rate <= 0) {
-      throw new RangeError("rate must be a positive integer");
-    }
-    // Other values break the padding (RFC 9861), and 0x00 even lets different messages collide.
-    if (!Number.isInteger(separationByte) || separationByte < 0x01 || separationByte > 0x7f) {
-      throw new RangeError("separationByte must be an integer in [0x01, 0x7F]");
-    }
-    this.rate = rate;
-    this.separationByte = separationByte;
-    this.state = new Array(STATE_SIZE).fill(0n);
-    this.buffer = new Uint8Array(rate);
-    this.bufferLength = 0;
-    this.finalized = false;
-    this.squeezeOffset = rate; // force refill on first use after finalize
+    super(new KeccakP1600(), rate, separationByte);
   }
-
-  /**
-   * Absorbs input data into the sponge state.
-   * @param message - Input data to absorb
-   * @returns This instance for method chaining
-   * @throws Error if called after squeezing has begun
-   */
-  update(message: Uint8Array | ArrayBufferView | ArrayLike<number>): this {
-    if (this.finalized) {
-      throw new Error("Cannot update after squeezing has begun");
-    }
-
-    const chunk = ensureUint8Array(message);
-    const { rate, buffer, state } = this;
-    let bufferLength = this.bufferLength;
-    let offset = 0;
-
-    if (bufferLength > 0) {
-      const toFill = Math.min(rate - bufferLength, chunk.length);
-      buffer.set(chunk.subarray(0, toFill), bufferLength);
-      bufferLength += toFill;
-      offset += toFill;
-      if (bufferLength === rate) {
-        xorBlock(state, buffer);
-        keccakP1600_12rounds(state);
-        bufferLength = 0;
-      }
-    }
-
-    const chunkLength = chunk.length;
-    while (offset + rate <= chunkLength) {
-      const block = chunk.subarray(offset, offset + rate);
-      xorBlock(state, block);
-      keccakP1600_12rounds(state);
-      offset += rate;
-    }
-
-    if (offset < chunkLength) {
-      const remaining = chunk.subarray(offset);
-      buffer.set(remaining, bufferLength);
-      bufferLength += remaining.length;
-    }
-
-    this.bufferLength = bufferLength;
-    return this;
-  }
-
-  /**
-   * Squeezes output data from the sponge.
-   * @param outputLength - Number of bytes to output
-   * @returns Output bytes as Uint8Array
-   * @throws RangeError if outputLength is negative or not an integer
-   */
-  squeeze(outputLength: number): Uint8Array {
-    if (outputLength < 0 || !Number.isInteger(outputLength)) {
-      throw new RangeError("outputLength must be a non-negative integer");
-    }
-    const out = new Uint8Array(outputLength);
-    this.squeezeInto(out);
-    return out;
-  }
-
-  /**
-   * Creates a deep copy of this TurboShake instance.
-   * @returns New TurboShake instance with identical state
-   */
-  clone(): TurboShake {
-    const clone = new TurboShake(this.rate, this.separationByte);
-    for (let i = 0; i < STATE_SIZE; i++) {
-      clone.state[i] = this.state[i];
-    }
-    clone.buffer.set(this.buffer);
-    clone.bufferLength = this.bufferLength;
-    clone.finalized = this.finalized;
-    clone.squeezeOffset = this.squeezeOffset;
-    return clone;
-  }
-
-  /**
-   * Squeezes output data directly into a provided array.
-   * @param target - Target array to write output into
-   * @param offset - Starting offset in target array (default: 0)
-   * @param length - Number of bytes to write (default: target.length - offset)
-   * @returns The target array for convenience
-   * @throws TypeError if target is not Uint8Array
-   * @throws RangeError for invalid offset or length parameters
-   */
-  squeezeInto(target: Uint8Array, offset = 0, length?: number): Uint8Array {
-    if (!(target instanceof Uint8Array)) {
-      throw new TypeError("target must be a Uint8Array");
-    }
-    if (!Number.isInteger(offset) || offset < 0 || offset > target.length) {
-      throw new RangeError("offset must be an integer within [0, target.length]");
-    }
-    const actualLength = length === undefined ? target.length - offset : length;
-    if (!Number.isInteger(actualLength) || actualLength < 0 || offset + actualLength > target.length) {
-      throw new RangeError("length must be a non-negative integer and offset + length must be <= target.length");
-    }
-    if (actualLength === 0) {
-      return target;
-    }
-
-    this.ensureFinalized();
-
-    let produced = 0;
-    const { rate, state } = this;
-
-    while (produced < actualLength) {
-      if (this.squeezeOffset === rate) {
-        keccakP1600_12rounds(state);
-        this.squeezeOffset = 0;
-      }
-
-      const available = rate - this.squeezeOffset;
-      const chunk = Math.min(available, actualLength - produced);
-      readStateBytes(state, this.squeezeOffset, target, offset + produced, chunk);
-      this.squeezeOffset += chunk;
-      produced += chunk;
-    }
-
-    return target;
-  }
-
-  /**
-   * Squeezes output data and returns it as a hexadecimal string.
-   * @param outputLength - Number of bytes to output
-   * @returns Uppercase hexadecimal string representation
-   */
-  squeezeHex(outputLength: number): string {
-    return bytesToHex(this.squeeze(outputLength));
-  }
-
-  private ensureFinalized(): void {
-    if (this.finalized) {
-      return;
-    }
-    const { rate, state, buffer } = this;
-
-    if (this.bufferLength >= rate) {
-      throw new Error("Internal buffer is full before finalization");
-    }
-
-    buffer[this.bufferLength++] = this.separationByte;
-
-    xorBlock(state, buffer.subarray(0, this.bufferLength));
-
-    const padIndex = rate - 1;
-    const padLane = padIndex >> 3;
-    const padShift = BigInt((padIndex & 7) * 8);
-    state[padLane] = (state[padLane] ^ (0x80n << padShift)) & MASK_64;
-
-    keccakP1600_12rounds(state);
-
-    this.buffer.fill(0);
-    this.bufferLength = 0;
-    this.finalized = true;
-    this.squeezeOffset = 0;
-  }
-}
-
-function turboshake(rate: number, message: Uint8Array | ArrayBufferView | ArrayLike<number>, separationByte: number, outputLength: number): Uint8Array {
-  const ctx = new TurboShake(rate, separationByte);
-  ctx.update(message);
-  return ctx.squeeze(outputLength);
 }
 
 /**
@@ -325,8 +145,8 @@ function turboshake(rate: number, message: Uint8Array | ArrayBufferView | ArrayL
  * @param outputLength - Desired output length in bytes
  * @returns Hash output as Uint8Array
  */
-export function turboshake128(message: Uint8Array | ArrayBufferView | ArrayLike<number>, separationByte: number, outputLength: number): Uint8Array {
-  return turboshake(168, message, separationByte, outputLength);
+export function turboshake128(message: Input, separationByte: number, outputLength: number): Uint8Array {
+  return createTurboShake128(separationByte).update(message).squeeze(outputLength);
 }
 
 /**
@@ -336,8 +156,8 @@ export function turboshake128(message: Uint8Array | ArrayBufferView | ArrayLike<
  * @param outputLength - Desired output length in bytes
  * @returns Hash output as Uint8Array
  */
-export function turboshake256(message: Uint8Array | ArrayBufferView | ArrayLike<number>, separationByte: number, outputLength: number): Uint8Array {
-  return turboshake(136, message, separationByte, outputLength);
+export function turboshake256(message: Input, separationByte: number, outputLength: number): Uint8Array {
+  return createTurboShake256(separationByte).update(message).squeeze(outputLength);
 }
 
 /**
@@ -347,7 +167,7 @@ export function turboshake256(message: Uint8Array | ArrayBufferView | ArrayLike<
  * @param outputLength - Desired output length in bytes
  * @returns Uppercase hexadecimal string representation
  */
-export function turboshake128Hex(message: Uint8Array | ArrayBufferView | ArrayLike<number>, separationByte: number, outputLength: number): string {
+export function turboshake128Hex(message: Input, separationByte: number, outputLength: number): string {
   return bytesToHex(turboshake128(message, separationByte, outputLength));
 }
 
@@ -358,7 +178,7 @@ export function turboshake128Hex(message: Uint8Array | ArrayBufferView | ArrayLi
  * @param outputLength - Desired output length in bytes
  * @returns Uppercase hexadecimal string representation
  */
-export function turboshake256Hex(message: Uint8Array | ArrayBufferView | ArrayLike<number>, separationByte: number, outputLength: number): string {
+export function turboshake256Hex(message: Input, separationByte: number, outputLength: number): string {
   return bytesToHex(turboshake256(message, separationByte, outputLength));
 }
 
@@ -378,36 +198,4 @@ export function createTurboShake128(separationByte: number): TurboShake {
  */
 export function createTurboShake256(separationByte: number): TurboShake {
   return new TurboShake(136, separationByte);
-}
-
-/**
- * Converts a byte array to an uppercase hexadecimal string.
- * @param bytes - Input byte array
- * @returns Uppercase hexadecimal string representation
- */
-export function bytesToHex(bytes: Uint8Array): string {
-  const hex: string[] = new Array(bytes.length);
-  for (let i = 0; i < bytes.length; i++) {
-    const value = bytes[i];
-    hex[i] = value.toString(16).padStart(2, "0").toUpperCase();
-  }
-  return hex.join("");
-}
-
-/**
- * Converts a hexadecimal string to a byte array.
- * @param hex - Hexadecimal string (case-insensitive, non-hex characters ignored)
- * @returns Byte array representation
- * @throws Error if hex string has odd length after cleaning
- */
-export function hexToBytes(hex: string): Uint8Array {
-  const clean = hex.replace(/[^0-9a-fA-F]/g, "");
-  if (clean.length % 2 !== 0) {
-    throw new Error("Hex string must have an even length");
-  }
-  const out = new Uint8Array(clean.length / 2);
-  for (let i = 0; i < out.length; i++) {
-    out[i] = parseInt(clean.substr(i * 2, 2), 16);
-  }
-  return out;
 }
