@@ -134,14 +134,15 @@ export class TurboShake {
   /**
    * Creates a new TurboShake instance.
    * @param rate - The rate parameter in bytes (168 for TurboSHAKE128, 136 for TurboSHAKE256)
-   * @param separationByte - Domain separation byte value (0x01-0xFF)
+   * @param separationByte - Domain separation byte value (0x01-0x7F)
    */
   constructor(rate: number, separationByte: number) {
     if (!Number.isInteger(rate) || rate <= 0) {
       throw new RangeError("rate must be a positive integer");
     }
-    if (separationByte < 0 || separationByte > 0xff || !Number.isInteger(separationByte)) {
-      throw new RangeError("separationByte must be an integer in [0, 255]");
+    // Other values break the padding (RFC 9861), and 0x00 even lets different messages collide.
+    if (!Number.isInteger(separationByte) || separationByte < 0x01 || separationByte > 0x7f) {
+      throw new RangeError("separationByte must be an integer in [0x01, 0x7F]");
     }
     this.rate = rate;
     this.separationByte = separationByte;
@@ -320,7 +321,7 @@ function turboshake(rate: number, message: Uint8Array | ArrayBufferView | ArrayL
 /**
  * Computes TurboSHAKE128 hash with 128-bit security level.
  * @param message - Input message to hash
- * @param separationByte - Domain separation byte (0x01-0xFF)
+ * @param separationByte - Domain separation byte (0x01-0x7F)
  * @param outputLength - Desired output length in bytes
  * @returns Hash output as Uint8Array
  */
@@ -331,7 +332,7 @@ export function turboshake128(message: Uint8Array | ArrayBufferView | ArrayLike<
 /**
  * Computes TurboSHAKE256 hash with 256-bit security level.
  * @param message - Input message to hash
- * @param separationByte - Domain separation byte (0x01-0xFF)
+ * @param separationByte - Domain separation byte (0x01-0x7F)
  * @param outputLength - Desired output length in bytes
  * @returns Hash output as Uint8Array
  */
@@ -342,7 +343,7 @@ export function turboshake256(message: Uint8Array | ArrayBufferView | ArrayLike<
 /**
  * Computes TurboSHAKE128 hash and returns it as a hexadecimal string.
  * @param message - Input message to hash
- * @param separationByte - Domain separation byte (0x01-0xFF)
+ * @param separationByte - Domain separation byte (0x01-0x7F)
  * @param outputLength - Desired output length in bytes
  * @returns Uppercase hexadecimal string representation
  */
@@ -353,7 +354,7 @@ export function turboshake128Hex(message: Uint8Array | ArrayBufferView | ArrayLi
 /**
  * Computes TurboSHAKE256 hash and returns it as a hexadecimal string.
  * @param message - Input message to hash
- * @param separationByte - Domain separation byte (0x01-0xFF)
+ * @param separationByte - Domain separation byte (0x01-0x7F)
  * @param outputLength - Desired output length in bytes
  * @returns Uppercase hexadecimal string representation
  */
@@ -363,7 +364,7 @@ export function turboshake256Hex(message: Uint8Array | ArrayBufferView | ArrayLi
 
 /**
  * Creates a new TurboShake instance configured for TurboSHAKE128.
- * @param separationByte - Domain separation byte (0x01-0xFF)
+ * @param separationByte - Domain separation byte (0x01-0x7F)
  * @returns New TurboShake instance with 128-bit security level
  */
 export function createTurboShake128(separationByte: number): TurboShake {
@@ -372,7 +373,7 @@ export function createTurboShake128(separationByte: number): TurboShake {
 
 /**
  * Creates a new TurboShake instance configured for TurboSHAKE256.
- * @param separationByte - Domain separation byte (0x01-0xFF)
+ * @param separationByte - Domain separation byte (0x01-0x7F)
  * @returns New TurboShake instance with 256-bit security level
  */
 export function createTurboShake256(separationByte: number): TurboShake {

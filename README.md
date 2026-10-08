@@ -31,7 +31,7 @@ import { turboshake128Hex, turboshake256Hex } from 'turboshake';
 
 const message = new TextEncoder().encode('Hello, world!');
 const hexHash = turboshake128Hex(message, 0x1F, 32);
-console.log(hexHash); // "1E415F1C5983AFF2169217277D17BB538CD945A397DDEC541F1CE41AF2C1B74C"
+console.log(hexHash); // "56FB68ADE138D9DCC4976725005B012AA48188980E4338CB380D6872FA5B4DF4"
 ```
 
 ### Different Output Lengths
@@ -103,7 +103,7 @@ const parsedBytes = hexToBytes("1E415F");
 #### `turboshake128(message, separationByte, outputLength)`
 
 - `message`: `Uint8Array | ArrayBufferView | ArrayLike<number>` - Input message
-- `separationByte`: `number` - Domain separation byte (0-255)
+- `separationByte`: `number` - Domain separation byte (0x01-0x7F)
 - `outputLength`: `number` - Desired output length in bytes
 - Returns: `Uint8Array` - Hash output
 
@@ -124,7 +124,7 @@ const parsedBytes = hexToBytes("1E415F");
 
 #### `createTurboShake128(separationByte)` / `createTurboShake256(separationByte)`
 
-- `separationByte`: `number` - Domain separation byte (0-255)
+- `separationByte`: `number` - Domain separation byte (0x01-0x7F)
 - Returns: `TurboShake` instance configured for TurboSHAKE128 or TurboSHAKE256
 
 ### `TurboShake` Class
